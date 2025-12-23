@@ -1,0 +1,450 @@
+package Quiz;
+
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableRowSorter;
+import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+// ==========================================
+// 1. PATTERNS: OBSERVER, FACTORY, & USER
+// ==========================================
+interface ScoreObserver {
+    void onScoreUpdate(int newScore);
+}
+
+interface User { String getRole(); }
+class Admin implements User { public String getRole() { return "Admin"; } }
+class Student implements User { public String getRole() { return "Student"; } }
+
+class UserFactory {
+    public static User createUser(String email) {
+        if (email.toLowerCase().contains("admin")) return new Admin();
+        return new Student();
+    }
+}
+
+// ==========================================
+// 2. PATTERNS: BUILDER & ADAPTER
+// ==========================================
+class Question {
+    String text;
+    String[] opts;
+    int correct;
+
+    Question(String t, String[] o, int c) {
+        this.text = t;
+        this.opts = o;
+        this.correct = c;
+    }
+
+    public static class Builder {
+        private String text;
+        private String[] opts = {"Option A", "Option B", "Option C", "Option D"};
+        private int correct;
+        public Builder setText(String t) { this.text = t; return this; }
+        public Builder setOptions(String... o) { this.opts = o; return this; }
+        public Builder setCorrect(int i) { this.correct = i; return this; }
+        public Question build() { return new Question(text, opts, correct); }
+    }
+}
+
+class LegacyQuestion {
+    public String getPrompt() { return "What is the capital of France?"; }
+    public String getAnswers() { return "London,Berlin,Paris,Madrid"; }
+    public int getRightIndex() { return 2; }
+}
+
+class QuestionAdapter extends Question {
+    public QuestionAdapter(LegacyQuestion legacy) {
+        super(legacy.getPrompt(), legacy.getAnswers().split(","), legacy.getRightIndex());
+    }
+}
+
+// ==========================================
+// 3. PATTERN: PROXY (Access Control)
+// ==========================================
+interface QuizOperations {
+    void addQuestion(Question q);
+    void deleteQuestion(int index);
+    void editQuestion(int index, Question q);
+}
+
+class QuizProxy implements QuizOperations {
+    private User user;
+    public QuizProxy(User user) { this.user = user; }
+
+    private boolean checkAccess() {
+        if ("Admin".equals(user.getRole())) return true;
+        JOptionPane.showMessageDialog(null, "Access Denied: Admin role required.");
+        return false;
+    }
+
+    @Override
+    public void addQuestion(Question q) { if (checkAccess()) QuizManager.getInstance().addQuestion(q); }
+    @Override
+    public void deleteQuestion(int index) { if (checkAccess()) QuizManager.getInstance().deleteQuestion(index); }
+    @Override
+    public void editQuestion(int index, Question q) { if (checkAccess()) QuizManager.getInstance().editQuestion(index, q); }
+}
+
+// ==========================================
+// 4. PATTERN: SINGLETON (Managers)
+// ==========================================
+class QuizManager {
+    private static QuizManager instance;
+    private List<Question> pool = new ArrayList<>();
+    private int cursor = 0;
+
+    private QuizManager() {
+        pool.add(new Question.Builder().setText("1. Which pattern uses a single instance?").setOptions("Proxy","Singleton","Factory","Adapter").setCorrect(1).build());
+        pool.add(new QuestionAdapter(new LegacyQuestion()));
+        pool.add(new Question.Builder().setText("3. Which pattern notifies others of changes?").setOptions("Observer","Builder","Facade","Strategy").setCorrect(0).build());
+        pool.add(new Question.Builder().setText("4. Java keyword for constants?").setOptions("static","final","volatile","transient").setCorrect(1).build());
+    }
+
+    public static QuizManager getInstance() {
+        if (instance == null) instance = new QuizManager();
+        return instance;
+    }
+
+    public void addQuestion(Question q) { pool.add(q); }
+    public void deleteQuestion(int i) { if(i >= 0 && i < pool.size()) pool.remove(i); }
+    public void editQuestion(int i, Question q) { if(i >= 0 && i < pool.size()) pool.set(i, q); }
+    public List<Question> getPool() { return pool; }
+    public void start() { cursor = 0; Collections.shuffle(pool); }
+    public Question next() { return (cursor < pool.size()) ? pool.get(cursor++) : null; }
+    public int getProgress() { return cursor; }
+}
+
+class ScoreManager {
+    private static ScoreManager instance;
+    private int score = 0;
+    private List<ScoreObserver> observers = new ArrayList<>();
+
+    private ScoreManager() {}
+    public static ScoreManager getInstance() {
+        if (instance == null) instance = new ScoreManager();
+        return instance;
+    }
+
+    public void addObserver(ScoreObserver o) { observers.add(o); }
+    public void addPoint() { score++; notifyObservers(); }
+    public void reset() { score = 0; notifyObservers(); }
+    private void notifyObservers() { for (ScoreObserver o : observers) o.onScoreUpdate(score); }
+    public int getScore() { return score; }
+}
+
+// ==========================================
+// 5. THE GUI SYSTEM
+// ==========================================
+public class QuizSystem extends JFrame implements ScoreObserver {
+    private JPanel cards;
+    private CardLayout cl = new CardLayout();
+    private User currentUser;
+    private QuizProxy proxy;
+    private JLabel scoreLabel;
+    private DefaultTableModel tableModel;
+    
+    private JLabel qLabel;
+    private JRadioButton[] rbOpts = new JRadioButton[4];
+    private ButtonGroup bgOpts = new ButtonGroup();
+    private Question currentQ;
+
+    public QuizSystem() {
+        setTitle("Quiz Time! Pro Edition");
+        setSize(950, 650);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        ScoreManager.getInstance().addObserver(this);
+        cards = new JPanel(cl);
+        cards.add(createLogin(), "LOGIN");
+        add(cards);
+    }
+
+    @Override
+    public void onScoreUpdate(int s) {
+        if(scoreLabel != null) scoreLabel.setText("Live Score: " + s);
+    }
+
+ private JPanel createLogin() {
+    JPanel loginPanel = new JPanel(new GridLayout(1, 2));
+
+    // LEFT SIDE: Brand Area
+    JPanel leftPanel = new JPanel(new GridBagLayout());
+    leftPanel.setBackground(new Color(63, 43, 150)); 
+    JLabel brandLabel = new JLabel("QUIZ TIME!");
+    brandLabel.setFont(new Font("Arial", Font.BOLD, 48));
+    brandLabel.setForeground(Color.WHITE);
+    leftPanel.add(brandLabel);
+
+    // RIGHT SIDE: Form Area
+    JPanel rightPanel = new JPanel(new GridBagLayout());
+    rightPanel.setBackground(new Color(210, 215, 220)); 
+    GridBagConstraints gbc = new GridBagConstraints();
+    gbc.insets = new Insets(8, 10, 8, 10);
+    gbc.fill = GridBagConstraints.HORIZONTAL;
+
+    JLabel title = new JLabel("Admin Login Panel", JLabel.CENTER);
+    title.setFont(new Font("Arial", Font.BOLD, 18));
+    gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
+    rightPanel.add(title, gbc);
+
+    // Email
+    gbc.gridwidth = 1; gbc.gridy = 1;
+    rightPanel.add(new JLabel("Email:"), gbc);
+    JTextField emailIn = new JTextField("admin@quiz.com", 15);
+    gbc.gridx = 1;
+    rightPanel.add(emailIn, gbc);
+
+    // Password
+    gbc.gridx = 0; gbc.gridy = 2;
+    rightPanel.add(new JLabel("Password:"), gbc);
+    JPasswordField passIn = new JPasswordField(15);
+    gbc.gridx = 1;
+    rightPanel.add(passIn, gbc);
+
+    // --- STRENGTH METER ---
+    JProgressBar strengthMeter = new JProgressBar(0, 100);
+    strengthMeter.setValue(0);
+    strengthMeter.setForeground(Color.RED);
+    strengthMeter.setStringPainted(true);
+    strengthMeter.setString("Weak");
+    gbc.gridx = 1; gbc.gridy = 3;
+    rightPanel.add(strengthMeter, gbc);
+
+    // Add listener for real-time updates
+    passIn.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+        public void insertUpdate(javax.swing.event.DocumentEvent e) { update(); }
+        public void removeUpdate(javax.swing.event.DocumentEvent e) { update(); }
+        public void changedUpdate(javax.swing.event.DocumentEvent e) { update(); }
+
+        private void update() {
+            String pwd = new String(passIn.getPassword());
+            int score = 0;
+            if (pwd.length() >= 4) score += 30;
+            if (pwd.length() >= 8) score += 30;
+            if (!pwd.equals(pwd.toLowerCase()) && pwd.length() > 0) score += 40;
+
+            strengthMeter.setValue(score);
+            if (score < 60) {
+                strengthMeter.setForeground(Color.RED);
+                strengthMeter.setString("Weak");
+            } else if (score < 100) {
+                strengthMeter.setForeground(Color.ORANGE);
+                strengthMeter.setString("Medium");
+            } else {
+                strengthMeter.setForeground(new Color(46, 184, 114));
+                strengthMeter.setString("Strong");
+            }
+        }
+    });
+
+    // Show Password Checkbox
+    JCheckBox showPass = new JCheckBox("Show Password");
+    showPass.setOpaque(false);
+    showPass.addActionListener(e -> {
+        if (showPass.isSelected()) passIn.setEchoChar((char) 0);
+        else passIn.setEchoChar('•');
+    });
+    gbc.gridx = 1; gbc.gridy = 4;
+    rightPanel.add(showPass, gbc);
+
+    // Buttons
+    JPanel btnPanel = new JPanel(new GridLayout(1, 2, 10, 0));
+    btnPanel.setOpaque(false);
+    
+    JButton loginBtn = new JButton("Login");
+    Color loginGreen = new Color(46, 184, 114);
+    loginBtn.setBackground(loginGreen);
+    loginBtn.setForeground(Color.WHITE);
+    addHoverEffect(loginBtn, loginGreen, loginGreen.darker());
+
+    JButton backBtn = new JButton("Back");
+    Color backRed = new Color(192, 57, 43);
+    backBtn.setBackground(backRed);
+    backBtn.setForeground(Color.WHITE);
+    addHoverEffect(backBtn, backRed, backRed.darker());
+
+    btnPanel.add(loginBtn); btnPanel.add(backBtn);
+    
+    gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 2;
+    rightPanel.add(btnPanel, gbc);
+
+    loginBtn.addActionListener(e -> {
+        String pwd = new String(passIn.getPassword());
+        if (pwd.length() < 8 || pwd.equals(pwd.toLowerCase())) {
+            JOptionPane.showMessageDialog(this, "Requirements: 8+ chars & 1 Capital letter.");
+        } else {
+            currentUser = UserFactory.createUser(emailIn.getText());
+            proxy = new QuizProxy(currentUser);
+            cards.add(createDashboard(), "DASH");
+            cl.show(cards, "DASH");
+        }
+    });
+
+    loginPanel.add(leftPanel);
+    loginPanel.add(rightPanel);
+    return loginPanel;
+}
+
+    private void addHoverEffect(JButton button, Color normal, Color hover) {
+        button.addMouseListener(new MouseAdapter() {
+            public void mouseEntered(MouseEvent e) { 
+                button.setBackground(hover); 
+                button.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            }
+            public void mouseExited(MouseEvent e) { button.setBackground(normal); }
+        });
+    }
+
+    private JPanel createDashboard() {
+        JPanel main = new JPanel(new BorderLayout());
+        JPanel sidebar = new JPanel(new GridLayout(8, 1, 5, 5));
+        sidebar.setPreferredSize(new Dimension(230, 0));
+        sidebar.setBackground(new Color(44, 62, 80));
+
+        JButton viewBtn = createSidebarBtn("View & Search Questions", Color.MAGENTA);
+        JButton addBtn = createSidebarBtn("Add Question", Color.GREEN);
+        JButton editBtn = createSidebarBtn("Edit Question", Color.CYAN);
+        JButton deleteBtn = createSidebarBtn("Delete Question", Color.RED);
+        JButton startBtn = createSidebarBtn("START QUIZ", Color.ORANGE);
+
+        viewBtn.addActionListener(e -> { cards.add(createListView(), "VIEW"); cl.show(cards, "VIEW"); });
+        addBtn.addActionListener(e -> showEditor(-1));
+        editBtn.addActionListener(e -> {
+            String id = JOptionPane.showInputDialog("Enter ID to Edit:");
+            if(id != null) showEditor(Integer.parseInt(id));
+        });
+        deleteBtn.addActionListener(e -> {
+            String id = JOptionPane.showInputDialog("Enter ID to Delete:");
+            if(id != null) { proxy.deleteQuestion(Integer.parseInt(id)); refreshTable(); }
+        });
+        startBtn.addActionListener(e -> {
+            QuizManager.getInstance().start();
+            ScoreManager.getInstance().reset();
+            cards.add(createPlayView(), "PLAY");
+            loadNext();
+            cl.show(cards, "PLAY");
+        });
+
+        sidebar.add(new JLabel("  NAVIGATION", JLabel.LEFT) {{ setForeground(Color.WHITE); }});
+        sidebar.add(viewBtn); sidebar.add(addBtn); sidebar.add(editBtn); sidebar.add(deleteBtn); sidebar.add(startBtn);
+
+        main.add(sidebar, BorderLayout.WEST);
+        main.add(new JLabel("Welcome, " + currentUser.getRole(), JLabel.CENTER), BorderLayout.NORTH);
+        return main;
+    }
+
+    private JPanel createListView() {
+        JPanel p = new JPanel(new BorderLayout(10, 10));
+        p.setBorder(BorderFactory.createEmptyBorder(15,15,15,15));
+        
+        tableModel = new DefaultTableModel(new String[]{"ID", "Question", "Correct Index"}, 0);
+        JTable table = new JTable(tableModel);
+        TableRowSorter<DefaultTableModel> sorter = new TableRowSorter<>(tableModel);
+        table.setRowSorter(sorter);
+        refreshTable();
+
+        JTextField search = new JTextField();
+        search.setBorder(BorderFactory.createTitledBorder("Live Search..."));
+        search.addKeyListener(new java.awt.event.KeyAdapter() {
+            public void keyReleased(java.awt.event.KeyEvent e) {
+                sorter.setRowFilter(RowFilter.regexFilter("(?i)" + search.getText()));
+            }
+        });
+
+        JButton back = new JButton("Back to Dashboard");
+        back.addActionListener(e -> cl.show(cards, "DASH"));
+
+        p.add(search, BorderLayout.NORTH);
+        p.add(new JScrollPane(table), BorderLayout.CENTER);
+        p.add(back, BorderLayout.SOUTH);
+        return p;
+    }
+
+    private JPanel createPlayView() {
+        JPanel p = new JPanel(new BorderLayout(20, 20));
+        p.setBorder(BorderFactory.createEmptyBorder(40,40,40,40));
+        
+        qLabel = new JLabel("Question", JLabel.CENTER);
+        qLabel.setFont(new Font("Arial", Font.BOLD, 18));
+        
+        JPanel optsPanel = new JPanel(new GridLayout(4, 1, 10, 10));
+        for(int i=0; i<4; i++){
+            rbOpts[i] = new JRadioButton();
+            bgOpts.add(rbOpts[i]);
+            optsPanel.add(rbOpts[i]);
+        }
+        
+        JButton submit = new JButton("Confirm Answer");
+        scoreLabel = new JLabel("Score: 0", JLabel.RIGHT);
+
+        submit.addActionListener(e -> {
+            for(int i=0; i<4; i++) {
+                if(rbOpts[i].isSelected() && i == currentQ.correct) ScoreManager.getInstance().addPoint();
+            }
+            loadNext();
+        });
+
+        p.add(qLabel, BorderLayout.NORTH);
+        p.add(optsPanel, BorderLayout.CENTER);
+        JPanel foot = new JPanel(new BorderLayout());
+        foot.add(submit, BorderLayout.CENTER);
+        foot.add(scoreLabel, BorderLayout.SOUTH);
+        p.add(foot, BorderLayout.SOUTH);
+        
+        return p;
+    }
+
+    private void loadNext() {
+        currentQ = QuizManager.getInstance().next();
+        if(currentQ != null) {
+            qLabel.setText("Question " + QuizManager.getInstance().getProgress() + ": " + currentQ.text);
+            for(int i=0; i<4; i++) rbOpts[i].setText(currentQ.opts[i]);
+            bgOpts.clearSelection();
+        } else {
+            JOptionPane.showMessageDialog(this, "Quiz Finished! Your Score: " + ScoreManager.getInstance().getScore());
+            cl.show(cards, "DASH");
+        }
+    }
+
+    private void showEditor(int id) {
+        JTextField qText = new JTextField();
+        JTextField cIdx = new JTextField();
+        if(id != -1) {
+            Question q = QuizManager.getInstance().getPool().get(id);
+            qText.setText(q.text);
+            cIdx.setText(String.valueOf(q.correct));
+        }
+
+        Object[] msg = {"Question Text:", qText, "Correct Index (0-3):", cIdx};
+        if(JOptionPane.showConfirmDialog(null, msg, "Edit Question", JOptionPane.OK_CANCEL_OPTION) == 0) {
+            Question nq = new Question.Builder().setText(qText.getText()).setCorrect(Integer.parseInt(cIdx.getText())).build();
+            if(id == -1) proxy.addQuestion(nq);
+            else proxy.editQuestion(id, nq);
+            refreshTable();
+        }
+    }
+
+    private void refreshTable() {
+        if(tableModel == null) return;
+        tableModel.setRowCount(0);
+        List<Question> list = QuizManager.getInstance().getPool();
+        for(int i=0; i<list.size(); i++) tableModel.addRow(new Object[]{i, list.get(i).text, list.get(i).correct});
+    }
+
+    private JButton createSidebarBtn(String t, Color c) {
+        JButton b = new JButton(t); b.setBackground(c); b.setOpaque(true); b.setBorderPainted(false);
+        b.setFont(new Font("Arial", Font.BOLD, 12)); return b;
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> new QuizSystem().setVisible(true));
+    }
+}
